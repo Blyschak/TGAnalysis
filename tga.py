@@ -53,6 +53,10 @@ class TGAData:
         temp, alpha = self.input
         return alpha
 
+    @property
+    def dtg(self):
+        pass
+
     @staticmethod
     def normalized_input(input):
         temp, mass_loss = input
@@ -101,6 +105,43 @@ class TGAData:
         return TGAData([np.array(temps), np.array(alphas)],
                        t_units=t_units,
                        heating_rate=heat_rate)
+
+
+class TGA:
+    def __init__(self,
+                 temp,
+                 mass_loss,
+                 mass_loss_derivative,
+                 heating_rate=1.,
+                 t_units='K'):
+        """ Create TGAData instance from the termogravimetric analysis data.
+        """
+
+        self.temp = np.array(temp)
+        self.mass_loss = np.array(mass_loss)
+        self.mass_loss_derivative = np.array(mass_loss_derivative)
+        self.heating_rate = heating_rate
+        self.t_units = t_units
+
+        min_mass = np.min(self.mass_loss)
+        max_mass = np.max(self.mass_loss)
+
+        self.alpha = (np.array(max_mass) - self.mass_loss) / np.array(max_mass - min_mass)
+
+        self.dtg = - self.mass_loss_derivative / np.array(max_mass - min_mass)
+
+    @property
+    def temp_in_kelvins(self):
+        if self.t_units == 'C':
+            return self.temp + 273.
+        return self.temp
+
+    def range(self, t_min, t_max):
+        boolean_mask = (t_min <= self.temp) & (self.temp <= t_max)
+        return TGA(self.temp[boolean_mask],
+                   self.mass_loss[boolean_mask],
+                   self.mass_loss_derivative[boolean_mask],
+                   self.heating_rate, t_units=self.t_units)
 
 
 @dataclass
@@ -155,13 +196,7 @@ class ModelFitting:
         pass
 
     def fit_model(self, tga, model):
-        slope, intercept, rvalue, pvalue, stderr = linregress(*self.fitting_xy(tga, model))
-        # print(slope, intercept, rvalue, pvalue, stderr)
-        return ModelFittingResult(Ea=slope, lnA=intercept, model=model,
-                                  rvalue=rvalue, stderr=stderr)
-
-    def fit_model(self, dtg, model):
-        slope, intercept, rvalue, pvalue, stderr = linregress(*self.fitting_xy(tga, model))
+        slope, intercept, rvalue, pvalue, stderr = linregress(*self.fitting_line(tga, model))
         # print(slope, intercept, rvalue, pvalue, stderr)
         return ModelFittingResult(Ea=slope, lnA=intercept, model=model,
                                   rvalue=rvalue, stderr=stderr)
@@ -196,6 +231,28 @@ class ModelFitting:
         # print(Y)
         # print(tga.alpha)
         # print(tga.derivative_in_kelvin())
+        # filter out NaN values that might happen with real data
+        filter_mask = ~np.isnan(Y) & ~np.isinf(Y)
+        fitting_tuple = (X[filter_mask], Y[filter_mask])
+        return fitting_tuple
+
+    @staticmethod
+    def fitting_line(tga, model):
+        # [ln(da/dT) + ln(beta) - ln(model(a))] vs -1/RT
+        #
+        ##########################################################################
+        # [ln(da/dT) + ln(beta) - ln(model(a))] = INTERCEPT + SLOPE * (-1/RT)
+        # INTERCEPT = lnA
+        # SLOPE = Ea
+        ##########################################################################
+        #
+        X = -1 / (R * tga.temp_in_kelvins)
+        Y = np.log(tga.dtg * tga.heating_rate / model(tga.alpha))
+
+        print(tga.temp)
+        print(tga.mass_loss)
+        print(tga.mass_loss_derivative)
+
         # filter out NaN values that might happen with real data
         filter_mask = ~np.isnan(Y) & ~np.isinf(Y)
         fitting_tuple = (X[filter_mask], Y[filter_mask])

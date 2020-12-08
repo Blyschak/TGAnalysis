@@ -96,11 +96,11 @@ class ResultsExporter:
             row += 1
             for idx, (model, params) in enumerate(results.items()):
                 self.sheet.cell(row=row, column=1).value = model
-                self.sheet.cell(row=row, column=2).value = params.Ea / 1000.
-                self.sheet.cell(row=row, column=3).value = params.delta_Ea / 1000.
-                self.sheet.cell(row=row, column=4).value = params.lnA
-                self.sheet.cell(row=row, column=5).value = params.delta_lnA
-                self.sheet.cell(row=row, column=6).value = params.rvalue
+                self.sheet.cell(row=row, column=2).value = round(params.Ea / 1000., 1)
+                self.sheet.cell(row=row, column=3).value = round(params.delta_Ea / 1000., 1)
+                self.sheet.cell(row=row, column=4).value = round(params.lnA, 1)
+                self.sheet.cell(row=row, column=5).value = round(params.delta_lnA, 1)
+                self.sheet.cell(row=row, column=6).value = round(params.rvalue, 3)
                 row += 1
 
         self.wb.save(self.filepath)
@@ -110,12 +110,14 @@ class XlsTGALoader:
     def __init__(self, filepath,
                  temp_column='A',
                  alpha_column='B',
+                 derivative_column='C',
                  sheet_name=None,
                  units='C',
                  heat_rate=1.):
         self.filepath = filepath
         self.temp_column = column_index_from_string(temp_column)
         self.alpha_column = column_index_from_string(alpha_column)
+        self.derivative_column = column_index_from_string(derivative_column)
         self.sheet_name = sheet_name
         self.units = units
         self.heat_rate = heat_rate
@@ -128,12 +130,14 @@ class XlsTGALoader:
 
         temps = []
         alphas = []
+        derivs = []
         for i in range(1, sheet.max_row + 1):
             temp_string = sheet.cell(i, self.temp_column).value
             alpha_string = sheet.cell(i, self.alpha_column).value
+            deriv_string = sheet.cell(i, self.derivative_column).value
 
             # assume no more data
-            if not temp_string or not alpha_string:
+            if not temp_string:
                 break
 
             try:
@@ -146,9 +150,14 @@ class XlsTGALoader:
             except ValueError as err:
                 raise ValueError(f'Invalid number at {i}:{self.temp_column}: {err}')
 
-        return tga.TGAData.from_table(temps, alphas,
-                                      t_units=self.units,
-                                      heat_rate=self.heat_rate)
+            try:
+                derivs.append(float(deriv_string))
+            except ValueError as err:
+                raise ValueError(f'Invalid number at {i}:{self.temp_column}: {err}')
+
+        return tga.TGA(temps, alphas, derivs,
+                       t_units=self.units,
+                       heating_rate=self.heat_rate)
 
 
 class MainWindow(tk.Frame):
@@ -182,6 +191,13 @@ class MainWindow(tk.Frame):
         self.alpha_column_entry = tk.Entry(self, text="Alpha Column:")
         self.alpha_column_entry.insert(END, "B")
         self.alpha_column_entry.grid(row=3, column=1)
+
+        self.deriv_column_lable = tk.Label(self, text="DTG Column:")
+        self.deriv_column_lable.grid(row=4, column=0)
+        self.deriv_column_entry = tk.Entry(self, text="DTG Column:")
+        self.deriv_column_entry.insert(END, "C")
+        self.deriv_column_entry.grid(row=4, column=1)
+
 
         self.fit_model_btn = tk.Button(self, text="Fit kinetic model",
                                        command=self.fit_model)
@@ -242,7 +258,7 @@ class MainWindow(tk.Frame):
             plot.legend()
 
             dt_plot = plot.twinx()
-            dt_plot.plot(self.tga.temp, self.tga.derivative(),
+            dt_plot.plot(self.tga.temp, self.tga.dtg,
                          label="DTG curve", color='red')
             dt_plot.set_ylabel("d(alpha)/dT")
             dt_plot.legend()
