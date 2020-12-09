@@ -1,112 +1,26 @@
 import os
 import tempfile
 import tkinter as tk
-from dataclasses import dataclass
+import uuid
 from tkinter import filedialog, END
 from tkinter import messagebox
 from typing import Iterable
 
 import matplotlib.backends.backend_tkagg as tkagg
 import matplotlib.figure as mplfig
-import openpyxl as openpyxl
+import openpyxl
 from matplotlib.backends._backend_tk import NavigationToolbar2Tk
 from openpyxl.utils import column_index_from_string
 
 import openfile
 import tga
 from openfile import openfile
-
-
-@dataclass(frozen=True)
-class TemperatureRange:
-    T_first: float
-    T_second: float
-
-
-class TemperatureInputFrame(tk.Frame):
-    def __init__(self, master):
-        super().__init__(master)
-        self.temperature_input = tk.Entry(self)
-        self.temperature_label = tk.Label(self, text="T, C")
-        self.temperature_label.grid(row=0, column=1)
-        self.temperature_input.grid(row=0, column=2)
-
-    def get_value(self):
-        return float(self.temperature_input.get())
-
-
-class TemperatureRangeInputFrame(tk.Frame):
-    def __init__(self, master):
-        super().__init__(master)
-        self.master = master
-        self.temperature_inputs = []
-
-        self.temperature_input_container = tk.Frame(self)
-
-        self.temperature_input_add_btn = tk.Button(self,
-                                                   text="Add Temperature Point",
-                                                   command=self.add_temperature_input)
-        self.temperature_input_discard_btn = tk.Button(self,
-                                                       text="Discard",
-                                                       command=self.discard_temperature_input)
-
-        self.temperature_input_add_btn.grid(row=0, column=0)
-        self.temperature_input_discard_btn.grid(row=0, column=1)
-        self.temperature_input_container.grid(row=1, columnspan=2)
-
-        self.add_temperature_input()
-        self.add_temperature_input()
-
-    def add_temperature_input(self):
-        temperature_input = TemperatureInputFrame(self.temperature_input_container)
-        temperature_input.pack()
-        self.temperature_inputs.append(temperature_input)
-
-    def discard_temperature_input(self):
-        if len(self.temperature_inputs) < 3:
-            return
-        temperature_input = self.temperature_inputs.pop()
-        temperature_input.destroy()
-
-    def get_temperature_ranges(self) -> Iterable[TemperatureRange]:
-        for temp_inputs in zip(self.temperature_inputs, self.temperature_inputs[1:]):
-            first, second = temp_inputs
-            yield TemperatureRange(first.get_value(), second.get_value())
-
-
-class ResultsExporter:
-    def __init__(self, filepath):
-        self.filepath = filepath
-        self.wb = openpyxl.Workbook()
-        self.sheet = self.wb.active
-
-    def export(self, range_results):
-        row = 1
-        for temperature_range, results in range_results.items():
-            temp_first, temp_second = temperature_range.T_first, temperature_range.T_second
-            self.sheet.merge_cells(start_row=row, end_row=row, start_column=1, end_column=6)
-            self.sheet.cell(row=row, column=1).value = f'T: [{temp_first}C-{temp_second}C]'
-            row += 1
-            self.sheet.cell(row=row, column=1).value = 'Model'
-            self.sheet.cell(row=row, column=2).value = 'E_a, kJ/mol'
-            self.sheet.cell(row=row, column=3).value = 'delta(E_a), kJ/mol'
-            self.sheet.cell(row=row, column=4).value = 'lnA'
-            self.sheet.cell(row=row, column=5).value = 'delta(lnA)'
-            self.sheet.cell(row=row, column=6).value = 'r_value'
-            row += 1
-            for idx, (model, params) in enumerate(results.items()):
-                self.sheet.cell(row=row, column=1).value = model
-                self.sheet.cell(row=row, column=2).value = round(params.Ea / 1000., 1)
-                self.sheet.cell(row=row, column=3).value = round(params.delta_Ea / 1000., 1)
-                self.sheet.cell(row=row, column=4).value = round(params.lnA, 1)
-                self.sheet.cell(row=row, column=5).value = round(params.delta_lnA, 1)
-                self.sheet.cell(row=row, column=6).value = round(params.rvalue, 3)
-                row += 1
-
-        self.wb.save(self.filepath)
+from tga import TemperatureRange
 
 
 class XlsTGALoader:
+    """ Load TGA data from excel. """
+
     def __init__(self, filepath,
                  temp_column='A',
                  alpha_column='B',
@@ -160,7 +74,99 @@ class XlsTGALoader:
                        heating_rate=self.heat_rate)
 
 
+class XlsResultsExporter:
+    """ Save results into excel. """
+
+    def __init__(self, filepath):
+        self.filepath = filepath
+        self.wb = openpyxl.Workbook()
+        self.sheet = self.wb.active
+
+    def export(self, range_results):
+        row = 1
+        for temperature_range, results in range_results.items():
+            temp_first, temp_second = temperature_range.T_first, temperature_range.T_second
+            self.sheet.merge_cells(start_row=row, end_row=row, start_column=1, end_column=6)
+            self.sheet.cell(row=row, column=1).value = f'T: [{temp_first}C-{temp_second}C]'
+            row += 1
+            self.sheet.cell(row=row, column=1).value = 'Model'
+            self.sheet.cell(row=row, column=2).value = 'E_a, kJ/mol'
+            self.sheet.cell(row=row, column=3).value = 'delta(E_a), kJ/mol'
+            self.sheet.cell(row=row, column=4).value = 'lnA'
+            self.sheet.cell(row=row, column=5).value = 'delta(lnA)'
+            self.sheet.cell(row=row, column=6).value = 'r_value'
+            row += 1
+            for idx, (model, params) in enumerate(results.items()):
+                self.sheet.cell(row=row, column=1).value = model
+                self.sheet.cell(row=row, column=2).value = round(params.Ea / 1000., 1)
+                self.sheet.cell(row=row, column=3).value = round(params.delta_Ea / 1000., 1)
+                self.sheet.cell(row=row, column=4).value = round(params.lnA, 1)
+                self.sheet.cell(row=row, column=5).value = round(params.delta_lnA, 1)
+                self.sheet.cell(row=row, column=6).value = round(params.rvalue, 3)
+                row += 1
+
+        self.wb.save(self.filepath)
+
+
+class TemperatureInputFrame(tk.Frame):
+    """ Temperature input frame. """
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.temperature_input = tk.Entry(self)
+        self.temperature_label = tk.Label(self, text="T, C")
+        self.temperature_label.grid(row=0, column=1)
+        self.temperature_input.grid(row=0, column=2)
+
+    def get_value(self):
+        return float(self.temperature_input.get())
+
+
+class TemperatureRangeInputFrame(tk.Frame):
+    """ Temperature range input. Implements buttons
+    which spawn new TemperatureInputFrame or delete them. """
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.master = master
+        self.temperature_inputs = []
+
+        self.temperature_input_container = tk.Frame(self)
+
+        self.temperature_input_add_btn = tk.Button(self,
+                                                   text="Add Temperature Point",
+                                                   command=self.add_temperature_input)
+        self.temperature_input_discard_btn = tk.Button(self,
+                                                       text="Discard",
+                                                       command=self.discard_temperature_input)
+
+        self.temperature_input_add_btn.grid(row=0, column=0)
+        self.temperature_input_discard_btn.grid(row=0, column=1)
+        self.temperature_input_container.grid(row=1, columnspan=2)
+
+        self.add_temperature_input()
+        self.add_temperature_input()
+
+    def add_temperature_input(self):
+        temperature_input = TemperatureInputFrame(self.temperature_input_container)
+        temperature_input.pack()
+        self.temperature_inputs.append(temperature_input)
+
+    def discard_temperature_input(self):
+        if len(self.temperature_inputs) < 3:
+            return
+        temperature_input = self.temperature_inputs.pop()
+        temperature_input.destroy()
+
+    def get_temperature_ranges(self) -> Iterable[TemperatureRange]:
+        for temp_inputs in zip(self.temperature_inputs, self.temperature_inputs[1:]):
+            first, second = temp_inputs
+            yield TemperatureRange(first.get_value(), second.get_value())
+
+
 class MainWindow(tk.Frame):
+    """ This is the main application window. """
+
     def __init__(self, master):
         super().__init__(master)
         self.master = master
@@ -197,7 +203,6 @@ class MainWindow(tk.Frame):
         self.deriv_column_entry = tk.Entry(self, text="DTG Column:")
         self.deriv_column_entry.insert(END, "C")
         self.deriv_column_entry.grid(row=4, column=1)
-
 
         self.fit_model_btn = tk.Button(self, text="Fit kinetic model",
                                        command=self.fit_model)
@@ -242,8 +247,8 @@ class MainWindow(tk.Frame):
                 temperature_ranges_results[trange] = results
 
             tempfilepath = os.path.join(tempfile.gettempdir(),
-                                        tempfile.gettempprefix() + '.xlsx')
-            ResultsExporter(tempfilepath).export(temperature_ranges_results)
+                                        tempfile.gettempprefix() + str(uuid.uuid4()) + '.xlsx')
+            XlsResultsExporter(tempfilepath).export(temperature_ranges_results)
             openfile(tempfilepath)
         except Exception as err:
             messagebox.showerror("Error", f"Error: {err}")
